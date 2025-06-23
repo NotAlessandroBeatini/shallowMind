@@ -186,23 +186,33 @@ class BaseHuggingFaceDataset(Dataset):
 
     # === __init__ (loading tokenized data) - Unchanged ===
     def __init__(self, split: str, specific_tokenized_path: str):
-        # ... (Your corrected __init__ from before - this is good) ...
         self.split = split
         self.tokenized_path = Path(specific_tokenized_path)
         self.dataset = None
         if not self.tokenized_path.exists():
-             raise FileNotFoundError(...)
+            raise FileNotFoundError(
+                f"Packed dataset for split '{self.split}' not found at {self.tokenized_path}"
+            )
         try:
-             logger.info(f"Loading packed dataset from specific path: {self.tokenized_path}")
-             self.dataset = load_from_disk(str(self.tokenized_path), keep_in_memory=False)
-             required_cols = {'input_ids', 'labels', 'attention_mask'} # Check for packed columns
-             if not required_cols.issubset(self.dataset.column_names):
-                  missing = required_cols - set(self.dataset.column_names)
-                  raise ValueError(f"Loaded packed dataset {self.tokenized_path} missing required columns: {missing}")
-             logger.info(...)
+            logger.info(
+                f"Loading packed dataset for split '{self.split}' from {self.tokenized_path}"
+            )
+            self.dataset = load_from_disk(str(self.tokenized_path), keep_in_memory=False)
+            required_cols = {'input_ids', 'labels', 'attention_mask'}  # Check for packed columns
+            if not required_cols.issubset(self.dataset.column_names):
+                missing = required_cols - set(self.dataset.column_names)
+                raise ValueError(
+                    f"Loaded packed dataset {self.tokenized_path} missing required columns: {missing}"
+                )
+            logger.info(
+                f"Packed dataset loaded from {self.tokenized_path} with columns {self.dataset.column_names}"
+            )
         except Exception as e:
-             logger.error(...)
-             raise e
+            logger.error(
+                f"Failed to load packed dataset from {self.tokenized_path} for split '{self.split}': {e}",
+                exc_info=True,
+            )
+            raise e
     # === END __init__ ===
 
     # === CORRECTED download_raw_split ===
