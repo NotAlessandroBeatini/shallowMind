@@ -1,0 +1,96 @@
+
+ZeRO-3 on-GPU (fastest, simplest)
+
+
+ds_cfg_gpu = {
+    # ---- batching ----------------------------------------------------------
+    "train_micro_batch_size_per_gpu": 4,      # fits comfortably on an A100
+    "gradient_accumulation_steps": 2,         # 4 × 2 × 8 GPUs  = 64/global step
+    "gradient_clipping": 1.0,
+
+    # ---- numerics ----------------------------------------------------------
+    "fp16": { "enabled": True },              # or switch to "bf16":{…}
+
+    # ---- ZeRO ----------------------------------------------------------------
+    "zero_optimization": {
+        "stage": 3,
+        "overlap_comm": True,
+        "contiguous_gradients": True,
+        "reduce_bucket_size":            500_000_000,
+        "stage3_prefetch_bucket_size":   500_000_000,
+        "stage3_param_persistence_threshold": 1_000_000
+    },
+
+    # ---- optimizer created by DeepSpeed (GPU AdamW fused) -------------------
+    "optimizer": {
+        "type": "AdamW",
+        "params": {
+            "lr": 1e-5,
+            "betas": [0.9, 0.999],
+            "eps": 1e-8,
+            "weight_decay": 0.01
+        }
+    },
+
+    # ---- optional LR scheduler ---------------------------------------------
+    "scheduler": {
+        "type": "WarmupDecayLR",
+        "params": {
+            "total_num_steps": 10_000,
+            "warmup_num_steps": 1_000,
+            "warmup_min_lr": 0
+        }
+    }
+}
+
+
+
+
+----------------------------
+
+
+ ZeRO-3 with CPU-offload (saves GPU RAM, slower)
+
+ds_cfg_offload = {
+    "train_micro_batch_size_per_gpu": 4,
+    "gradient_accumulation_steps": 2,
+    "gradient_clipping": 1.0,
+
+    "fp16": { "enabled": True },
+
+    "zero_optimization": {
+        "stage": 3,
+
+        # ---- PARAMETER offload ---------------------------------------------
+        "offload_param": {
+            "device": "cpu",
+            "pin_memory": True
+        },
+
+        "overlap_comm": True,
+        "contiguous_gradients": True,
+        "reduce_bucket_size":            500_000_000,
+        "stage3_prefetch_bucket_size":   500_000_000,
+        "stage3_param_persistence_threshold": 1_000_000
+    },
+
+    # ---- use DeepSpeed’s CPU Adam to avoid the runtime error ---------------
+    "optimizer": {
+        "type": "DeepSpeedCPUAdam",
+        "params": {
+            "lr": 1e-5,
+            "betas": [0.9, 0.999],
+            "eps": 1e-8,
+            "weight_decay": 0.01
+        }
+    },
+
+    "scheduler": {
+        "type": "WarmupDecayLR",
+        "params": {
+            "total_num_steps": 10_000,
+            "warmup_num_steps": 1_000,
+            "warmup_min_lr": 0
+        }
+    }
+}

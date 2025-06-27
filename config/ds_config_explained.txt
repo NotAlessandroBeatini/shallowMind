@@ -1,0 +1,40 @@
+{
+  // one “micro” batch that fits safely on a single GPU
+  "train_micro_batch_size_per_gpu": 4,
+
+  // accumulate gradients until we reach the effective batch size you want
+  "gradient_accumulation_steps": 2,
+
+  // Lightning computes the global batch automatically:
+  // global = micro × accumulation × world_size.
+  // You no longer need "train_batch_size" unless you want Lightning
+  // to validate the number explicitly.
+
+  "gradient_clipping": 1.0,
+
+  "fp16": {               // keep FP16 (or use "bf16")
+    "enabled": true
+  },
+
+  "zero_optimization": {
+    "stage": 3,
+
+    // ZeRO-3 offload (optional; comment out if you’d rather stay on-GPU)
+    "offload_param": {
+      "device": "cpu",
+      "pin_memory": true
+    },
+    "offload_optimizer": {
+      "device": "cpu",
+      "pin_memory": true
+    },
+
+    "overlap_comm": true,
+    "contiguous_gradients": true,
+
+    // bucket sizes that Lightning uses in its own docs
+    "reduce_bucket_size":            500000000,
+    "stage3_prefetch_bucket_size":   500000000,
+    "stage3_param_persistence_threshold": 1000000
+  }
+}
