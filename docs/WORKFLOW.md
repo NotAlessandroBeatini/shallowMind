@@ -40,9 +40,12 @@ If `ray.use_ray` is true, Ray will launch multiple workers with the strategy spe
 
 ## 4. Logs and caches
 
-Logs go to the `logs/` directory (configured via `utils.setup_logging`). Tokenized datasets are stored in `data/main_cache` and model downloads in `data/model_cache` by default.
+- **Training logs:** by default `utils.setup_logging` writes files in `logs/` under the project root. Each run gets a timestamped `app_<time>.log`. Pass `log_dir` to change this location.
+- **Dataset download logs:** `src/utils/download_datasets.py` saves logs to `data/logs/download_datasets_<n>.log`. Use `--log-dir` to override.
+- **Raw datasets:** downloaded splits reside in `data/main_cache/raw/`.
+- **Tokenized datasets:** chunks live in `data/main_cache/tokenized/<tokenizer>/`.
+- **Model cache:** Hugging Face models are stored in `data/model_cache`.
 
 ## 5. Notebook quick test
 
 A simple sanity‑check notebook lives at `src/train/train.ipynb` and can be used to experiment with the data module or models.
-
