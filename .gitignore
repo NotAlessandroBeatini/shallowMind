@@ -22,6 +22,8 @@ cached_data/
 *.arrow
 *.lock
 *.vsix
+*.metadata
+*.parquet
 
 # --- Logs / outputs ---
 logs/

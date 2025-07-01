@@ -417,6 +417,59 @@ class OpenWebTextDataset(BaseHuggingFaceDataset):
     # Update trust_remote_code based on previous error logs
     trust_remote_code = True # <-- Set based on error messages
 
+
+# ------------------------------------------------------------------
+# Large-scale web corpora (stream-friendly)
+# ------------------------------------------------------------------
+
+@register_dataset("cerebras-slim_pajama")
+class SlimPajamaDataset(BaseHuggingFaceDataset):
+    """
+    cerebras/SlimPajama-627B  –  already deduped and doc-filtered
+    """
+    dataset_name = "cerebras/SlimPajama-627B"
+    dataset_config_name = "default"        # <- must be a string, not None
+    available_splits = ["train"]
+    text_column = "text"
+    trust_remote_code = False              # no custom code
+
+
+@register_dataset("refinedweb")
+class RefinedWebDataset(BaseHuggingFaceDataset):
+    """
+    RefinedWeb / CC-Net 2023-12 snapshot (English only by default)
+    """
+    dataset_name = "refinedweb"
+    dataset_config_name = "default"
+    available_splits = ["train"]
+    text_column = "text"
+    trust_remote_code = True               # HF script uses remote_code
+
+
+@register_dataset("dolma")
+class DolmaDataset(BaseHuggingFaceDataset):
+    """
+    Dolma v1 – 3 T tokens, mixture of web, books, code, papers.
+    We keep the English split for now.
+    """
+    dataset_name = "allenai/dolma"
+    dataset_config_name = "dolma-v1-en"    # other configs: -multi, -code, …
+    available_splits = ["train"]
+    text_column = "text"
+    trust_remote_code = True
+
+
+@register_dataset("redpajama")
+class RedPajamaDataset(BaseHuggingFaceDataset):
+    """
+    RedPajama v1.2 – replica of LLaMA mix.
+    """
+    dataset_name = "togethercomputer/RedPajama-Data-1T"
+    dataset_config_name = "default"
+    available_splits = ["train"]
+    text_column = "text"
+    trust_remote_code = True
+
 # Add other dataset classes following the same pattern...
 
 

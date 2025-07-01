@@ -617,7 +617,7 @@ if __name__ == "__main__":
 
     # Use the setup_logging utility if available and configured
     try:
-        setup_logging(level=logging.INFO) # Or DEBUG for more verbosity
+        setup_logging(level=logging.INFO,file_logging=True) # Or DEBUG for more verbosity
     except NameError:
         # Fallback if setup_logging is not defined or imported
         logging.warning("setup_logging utility not found. Using basicConfig.")

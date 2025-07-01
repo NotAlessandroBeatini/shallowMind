@@ -9,6 +9,7 @@ import re # Import regular expressions for log file matching
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Union, Optional # Keep Union for Py 3.10
+from huggingface_hub import snapshot_download
 
 from datasets import load_dataset, DownloadMode
 try:
@@ -109,13 +110,45 @@ def setup_colored_logging(level=logging.INFO, log_dir: Union[str, Path, None] = 
 
 
 # === Configuration: Define Datasets to Download (Same as before, ensure trust_remote_code is correct) ===
+# DATASETS_TO_DOWNLOAD = [
+#     {"name": "refinedweb", "config": "default", "splits": ["train"], "trust_remote_code": True},
+#     {"name": "cerebras/SlimPajama-627B", "config": "default", "splits": ["train"], "trust_remote_code": False},
+#     {"name": "openwebtext", "config": None, "splits": ["train"], "trust_remote_code": True},
+#     {"name": "wikitext", "config": "wikitext-103-raw-v1", "splits": ["train", "validation", "test"], "trust_remote_code": False},
+#     {"name": "bookcorpus", "config": None, "splits": ["train"], "trust_remote_code": True},
+#     {"name": "oscar", "config": "unshuffled_deduplicated_en", "splits": ["train"], "trust_remote_code": True},
+# ]
 DATASETS_TO_DOWNLOAD = [
-    {"name": "refinedweb", "config": "default", "splits": ["train"], "trust_remote_code": True},
-    {"name": "cerebras/SlimPajama-627B", "config": "default", "splits": ["train"], "trust_remote_code": False},
-    {"name": "openwebtext", "config": None, "splits": ["train"], "trust_remote_code": True},
-    {"name": "wikitext", "config": "wikitext-103-raw-v1", "splits": ["train", "validation", "test"], "trust_remote_code": False},
-    {"name": "bookcorpus", "config": None, "splits": ["train"], "trust_remote_code": True},
-    {"name": "oscar", "config": "unshuffled_deduplicated_en", "splits": ["train"], "trust_remote_code": True},
+    # ---------- new ----------
+    # {"name": "cerebras/SlimPajama-627B", "config": "default",
+    #  "splits": ["train"], "trust_remote_code": False},
+
+    # {"name": "HuggingFaceM4/refinedweb", "config": "default",
+    #  "splits": ["train"], "trust_remote_code": True},
+
+    # {"name": "allenai/dolma", "config": "v1_7",
+    #  "splits": ["train"], "trust_remote_code": True},
+     
+    # {"name": "togethercomputer/RedPajama-Data-1T", "config": "default",
+    #  "splits": ["train"], "trust_remote_code": True},
+
+    {
+        "name": "HuggingFaceFW/fineweb",
+        "config": "default",           # the full 15-T-token split
+        "splits": ["train"],
+        "trust_remote_code": True
+    },
+
+
+    # ---------- existing ----------
+    # {"name": "openwebtext", "config": None,
+    #  "splits": ["train"], "trust_remote_code": True},
+    # {"name": "wikitext", "config": "wikitext-103-raw-v1",
+    #  "splits": ["train", "validation", "test"], "trust_remote_code": False},
+    # {"name": "bookcorpus", "config": None,
+    #  "splits": ["train"], "trust_remote_code": True},
+    # {"name": "oscar", "config": "unshuffled_deduplicated_en",
+    #  "splits": ["train"], "trust_remote_code": True},
 ]
 # =====================================================
 
@@ -158,12 +191,56 @@ def get_dataset_size_estimate(dataset_name: str, config_name: Union[str, None] =
 
 # --- download_dataset_worker (Same as before) ---
 def download_dataset_worker(dataset_info: dict, raw_cache_dir: str, download_mode: DownloadMode) -> tuple[str, bool]:
-    name = dataset_info["name"]; config = dataset_info.get("config")
-    splits = dataset_info.get("splits", ["train"]); trust_code = dataset_info.get("trust_remote_code", False)
+ 
+    name = dataset_info["name"]; 
+    config = dataset_info.get("config")
+    splits = dataset_info.get("splits", ["train"]); 
+    trust_code = dataset_info.get("trust_remote_code", False)
     dataset_id = f"{name}" + (f" (config: {config})" if config else "")
     success = True; start_time = time.time(); worker_logger = logging.getLogger()
     worker_logger.info(f"Starting download task for {dataset_id} (trust_remote_code={trust_code})...")
-    load_args = [name];
+    load_args = [name]
+
+    # ---- fast path for the huge FineWeb dump -----------------
+    if name == "HuggingFaceFW/fineweb" and config == "default":
+        
+        mirror_dir = Path(raw_cache_dir) / "HuggingFaceFW_fineweb" / "data"
+
+        try:
+            t0 = time.time()
+            snapshot_download(
+                repo_id          = name,
+                repo_type        = "dataset",
+                local_dir        = mirror_dir.parent,        # writes data/*.parquet
+                allow_patterns   = "data/*.parquet",
+                resume_download  = True,
+                max_workers      = 32,                       # 86 is usually throttled
+            )
+            worker_logger.info("✅ FineWeb mirror finished in %.1f s", time.time() - t0)
+
+            # ---------- build the Arrow cache immediately ----------
+            for split in splits:                             # ← PROBLEM ① fixed
+                ds = load_dataset(
+                    name,
+                    config,                                  # ← PROBLEM ② fixed
+                    split           = split,
+                    data_dir        = str(mirror_dir),       # ← PROBLEM ③ fixed
+                    cache_dir       = raw_cache_dir,         # ensures arrow lives under raw/
+                    trust_remote_code = trust_code,
+                    download_mode   = DownloadMode.REUSE_DATASET_IF_EXISTS,
+                )
+                # Force materialisation (otherwise build is lazy)
+                _ = len(ds)
+                worker_logger.info("Built Arrow for FineWeb %s (%d rows)", split, len(ds))
+
+            return f"{name} mirror+arrow", True
+
+        except Exception as e:
+            worker_logger.error("❌ FineWeb mirror/arrow failed: %s", e)
+            return f"{name} mirror+arrow", False
+    # -----------------------------------------------------------
+
+
     if config: load_args.append(config)
     for split in splits:
         try:
