@@ -48,7 +48,7 @@ class LightningDataModule(pl.LightningDataModule):
         batch_size: int = 8,
         max_length: int = 512,
         num_workers: int = 4,
-        cache_dir: str = "cached_data" # Relative to project root or absolute
+        cache_dir: str = "data/main_cache" # Relative to project root or absolute
     ):
         super().__init__()
         self.tokenizer = tokenizer

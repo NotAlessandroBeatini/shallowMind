@@ -373,7 +373,8 @@ class OscarDataset(BaseHuggingFaceDataset):
     def get_split_names(cls, **kwargs) -> Dict[str, Dict[str, Any]]:
         splits_info = super().get_split_names(**kwargs)
 
-        train_split_percentage = kwargs.get("train_split_percentage", None)
+        raw = kwargs.get("train_split_percentage")
+        train_split_percentage = ([float(x) for x in raw.split("-")] if isinstance(raw, str) else raw)
 
         if "train" in splits_info and train_split_percentage is not None:
             try:

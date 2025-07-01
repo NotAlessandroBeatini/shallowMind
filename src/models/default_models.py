@@ -31,6 +31,27 @@ class HuggingFaceLLM(pl.LightningModule):
     A PyTorch LightningModule for training/fine-tuning Hugging Face AutoModels
     for Causal Language Modeling, including text generation with sampling.
     """
+    def _safe_print(self, *objects, sep: str = " ", end: str = "\n", file=None, flush: bool = False):
+        """
+        Behaves like `LightningModule.print` **after** the model is attached to a Trainer,
+        but falls back to the built-in `print` **before** that (e.g. during __init__).
+
+        If `DEBUG_MODE` is on, always logs through the module-level logger instead.
+        """
+        # Debug mode: send everything to the Python logger
+        if getattr(self, "_debug_mode", False):
+            logger.info(sep.join(str(o) for o in objects))
+            return
+
+        trainer = getattr(self, "_trainer", None)   
+        if trainer is not None and getattr(trainer, "is_global_zero", True):
+            # The Lightning helper is now safe to call
+            super().print(*objects, sep=sep, end=end, file=file, flush=flush)
+        else:
+            # Trainer not yet attached → plain old print
+            print(*objects, sep=sep, end=end, file=file, flush=flush)
+
+
     def __init__(
         self,
         # --- Model and Tokenizer ---
@@ -64,9 +85,12 @@ class HuggingFaceLLM(pl.LightningModule):
     ):
         super().__init__()
         self._debug_mode = DEBUG_MODE
-        self._printer = logger.info if self._debug_mode else self.print
+        self._printer = self._safe_print
+        #self._printer = logger.info if self._debug_mode else self.print
 
         # Consolidate all potential hparams from __init__ args and kwargs
+        #locals() returns a dict of all local variables, right after entering the function, is essentially the full list
+        #of constructor arguments plus self.
         current_locals = locals().copy()
         hparams_to_save = {
             key: current_locals[key] for key in [

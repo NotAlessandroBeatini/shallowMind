@@ -28,9 +28,9 @@ model:
     model_name_or_path: "gpt2"      # (e.g., "gpt2", "distilgpt2", "EleutherAI/gpt-neo-125M")
     # tokenizer_name_or_path: null  # Optional: Only if tokenizer is different from model.
                                     #           If null/absent, uses model_name_or_path.
-    # model_cache_dir: "data/model_cache"  # Optional: Path to HuggingFace model cache.
+    model_cache_dir: "data/model_cache"  # Optional: Path to HuggingFace model cache.
                                          #           If null/absent, uses HF default.
-    # tokenizer_cache_dir: "data/model_cache" # Optional: Path to HuggingFace tokenizer cache.
+    tokenizer_cache_dir: "data/model_cache" # Optional: Path to HuggingFace tokenizer cache.
                                              #            If null/absent, uses HF default.
 
     # --- Training Hyperparameters ---
@@ -60,11 +60,11 @@ datamodule:
     dataset_configs:
       wikitext: {} # Use default wikitext-2-raw-v1 splits
       oscar:
-        train_split_percentage: [0.01-0.05] # Use 0.1% of OSCAR english train split
-      bookcorpus: {} # Uncomment to include bookcorpus
+        train_split_percentage: [0.001,0.002] # Use 0.1% of OSCAR english train split
+      #bookcorpus: {} # Uncomment to include bookcorpus
     batch_size: 8       # Per GPU batch size (adjust based on GPU memory)
     max_length: 128     # Max sequence length for tokenization
-    num_workers: 4      # Dataloader workers per process (adjust based on CPU/IO)
+    num_workers: 25      # Dataloader workers per process (adjust based on CPU/IO)
     cache_dir: "data/main_cache" # Relative to project root (resolved in train.py)
 
 trainer:

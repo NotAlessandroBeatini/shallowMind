@@ -12,6 +12,12 @@ from typing import Union, Optional # Keep Union for Py 3.10
 from huggingface_hub import snapshot_download
 
 from datasets import load_dataset, DownloadMode
+from huggingface_hub.utils import RepositoryNotFoundError, LocalEntryNotFoundError
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from urllib3.exceptions import IncompleteRead
+import socket
+import urllib3
+
 try:
     from huggingface_hub import repo_info
     from huggingface_hub.utils import HfHubHTTPError
@@ -201,35 +207,47 @@ def download_dataset_worker(dataset_info: dict, raw_cache_dir: str, download_mod
     worker_logger.info(f"Starting download task for {dataset_id} (trust_remote_code={trust_code})...")
     load_args = [name]
 
+    MAX_RETRIES = 5
+    RETRY_DELAY = 10  # seconds
+
     # ---- fast path for the huge FineWeb dump -----------------
     if name == "HuggingFaceFW/fineweb" and config == "default":
         
         mirror_dir = Path(raw_cache_dir) / "HuggingFaceFW_fineweb" / "data"
 
         try:
-            t0 = time.time()
-            snapshot_download(
-                repo_id          = name,
-                repo_type        = "dataset",
-                local_dir        = mirror_dir.parent,        # writes data/*.parquet
-                allow_patterns   = "data/*.parquet",
-                resume_download  = True,
-                max_workers      = 86,                       # 86 is usually throttled
-            )
-            worker_logger.info("✅ FineWeb mirror finished in %.1f s", time.time() - t0)
+            for attempt in range(MAX_RETRIES):
+                try:
+                    t0 = time.time()
+                    snapshot_download(
+                        repo_id          = name,
+                        repo_type        = "dataset",
+                        local_dir        = mirror_dir.parent,        # writes data/*.parquet
+                        allow_patterns   = "data/*.parquet",
+                        resume_download  = True,
+                        max_workers      = 48,
+                    )
+                    worker_logger.info("✅ FineWeb mirror finished in %.1f s", time.time() - t0)
+                    break  # download succeeded, exit retry loop
+
+                except (RequestsConnectionError, urllib3.exceptions.ProtocolError, IncompleteRead, socket.timeout) as net_err:
+                    worker_logger.warning("🌐 Network error on attempt %d/%d: %s", attempt + 1, MAX_RETRIES, net_err)
+                    if attempt < MAX_RETRIES - 1:
+                        time.sleep(RETRY_DELAY)
+                    else:
+                        raise
 
             # ---------- build the Arrow cache immediately ----------
-            for split in splits:                             # ← PROBLEM ① fixed
+            for split in splits:
                 ds = load_dataset(
                     name,
-                    config,                                  # ← PROBLEM ② fixed
-                    split           = split,
-                    data_dir        = str(mirror_dir),       # ← PROBLEM ③ fixed
-                    cache_dir       = raw_cache_dir,         # ensures arrow lives under raw/
+                    config,
+                    split             = split,
+                    data_dir          = str(mirror_dir),
+                    cache_dir         = raw_cache_dir,
                     trust_remote_code = trust_code,
-                    download_mode   = DownloadMode.REUSE_DATASET_IF_EXISTS,
+                    download_mode     = DownloadMode.REUSE_DATASET_IF_EXISTS,
                 )
-                # Force materialisation (otherwise build is lazy)
                 _ = len(ds)
                 worker_logger.info("Built Arrow for FineWeb %s (%d rows)", split, len(ds))
 
