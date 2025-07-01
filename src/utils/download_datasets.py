@@ -214,7 +214,7 @@ def download_dataset_worker(dataset_info: dict, raw_cache_dir: str, download_mod
                 local_dir        = mirror_dir.parent,        # writes data/*.parquet
                 allow_patterns   = "data/*.parquet",
                 resume_download  = True,
-                max_workers      = 32,                       # 86 is usually throttled
+                max_workers      = 86,                       # 86 is usually throttled
             )
             worker_logger.info("✅ FineWeb mirror finished in %.1f s", time.time() - t0)
 

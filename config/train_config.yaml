@@ -81,8 +81,8 @@ trainer:
 
 strategy:
   # --- Configuration for the Lightning Strategy ---
-  name: "deepspeed" # "deepspeed", "ddp", "fsdp", "auto"
-  config_path: "configs/ds_config_zero2.json" # Path to DeepSpeed JSON (relative to project root)
+  name: "deepspeed" # "deepspeed", "ddp", "fsdp", "auto" 
+  config_path: "config/ds_config.json" # Path to DeepSpeed JSON (relative to project root)
   find_unused_parameters: false # Set to true if encountering issues with model layers not having grads
 
 ray:

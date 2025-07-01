@@ -40,7 +40,7 @@ sys.path.append(str(PROJECT_ROOT)) # Add project root to path
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor # Other PL Callbacks managed in train_func
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.strategies import DeepSpeedStrategy # For DeepSpeed
+from ray.train.lightning import RayDeepSpeedStrategy
 
 try:
     import ray
@@ -134,13 +134,24 @@ def train_func_for_ray(train_loop_worker_config: dict):
     strategy_name = cfg_strategy.get("name", "deepspeed").lower()
     pl_strategy_object = None
     if strategy_name == "deepspeed":
-        ds_config_path_str = cfg_strategy.get("config_path", "config/ds_default.json")
-        ds_config_abs_path = resolve_path_in_config(ds_config_path_str, cfg_project_root)
-        if not ds_config_abs_path.exists():
-            raise FileNotFoundError(f"[Worker {worker_rank}] DeepSpeed config not found: {ds_config_abs_path}")
-        # Use PL's DeepSpeedStrategy, Ray handles the distributed environment.
-        pl_strategy_object = DeepSpeedStrategy(config=str(ds_config_abs_path))
-        logging.info(f"[Worker {worker_rank}] Using PL DeepSpeedStrategy: {ds_config_abs_path}")
+        # Accept either an inline dict or a path to a json file
+        ds_stage = cfg_strategy.get("stage", 3)           # default = ZeRO-3
+        if "config_dict" in cfg_strategy:
+            deepspeed_cfg = cfg_strategy["config_dict"]   # Python dict from YAML
+        else:
+            ds_path = resolve_path_in_config(
+                cfg_strategy.get("config_path", "config/ds_default.json"),
+                cfg_project_root
+            )
+            if not ds_path.exists():
+                raise FileNotFoundError(f"DeepSpeed config not found: {ds_path}")
+            deepspeed_cfg = str(ds_path)                  # path string
+
+        pl_strategy_object = RayDeepSpeedStrategy(
+            stage=ds_stage,
+            config=deepspeed_cfg
+        )
+        logging.info(f"[Worker {worker_rank}] Using RayDeepSpeedStrategy stage {ds_stage}")
     elif strategy_name == "ray_ddp":
         pl_strategy_object = ray.train.lightning.RayDDPStrategy(find_unused_parameters=cfg_strategy.get("find_unused_parameters", False))
         logging.info(f"[Worker {worker_rank}] Using RayDDPStrategy.")
