@@ -1,0 +1,97 @@
+# Example train_config.yaml
+
+run:
+  seed: 42
+  project: "llm-multinode-training" # Wandb project name
+  run_name: "gpt2-wikitext-oscar-test" # Wandb run name (can be dynamic)
+  use_wandb: true
+  wandb_log_model: false # Usually false for large models
+  checkpoint_dir: "outputs/checkpoints/" # Relative to project root
+  checkpoint_monitor: "val_loss"
+  checkpoint_mode: "min"
+  save_top_k: 2
+  save_last_checkpoint: true
+  use_early_stopping: true
+  early_stop_monitor: "val_loss"
+  early_stop_patience: 5
+  early_stop_mode: "min"
+  lr_monitor_logging_interval: "step" # or "epoch"
+
+model:
+  # --- Specify which model class to use ---
+  module_path: "src.models.default_models"
+  class_name: "HuggingFaceLLM"
+
+  # --- Keyword arguments passed to the model's __init__ ---
+  kwargs:
+    # --- Core Model & Tokenizer Specification ---
+    model_name_or_path: "gpt2"      # (e.g., "gpt2", "distilgpt2", "EleutherAI/gpt-neo-125M")
+    # tokenizer_name_or_path: null  # Optional: Only if tokenizer is different from model.
+                                    #           If null/absent, uses model_name_or_path.
+    model_cache_dir: "data/model_cache"  # Optional: Path to HuggingFace model cache.
+                                         #           If null/absent, uses HF default.
+    tokenizer_cache_dir: "data/model_cache" # Optional: Path to HuggingFace tokenizer cache.
+                                             #            If null/absent, uses HF default.
+
+    # MOVED IT TO DS_CONFIG FOR NATIVE INTEGRATION WITH DS
+    # --- Training Hyperparameters ---
+    # learning_rate: 5.0e-5
+    # weight_decay: 0.01
+    # adam_epsilon: 1.0e-8
+    # warmup_steps_ratio: 0.06          # Ratio of total training steps for linear warmup (e.g., 0.06 for 6%). Set to 0.0 for no warmup.
+
+    # --- Optimizer Selection (DeepSpeed related) ---
+    #use_deepspeed_adam: true          # Whether to try using DeepSpeed's Adam optimizers.
+    #prefer_cpu_adam: false            # ACHTUNG! MUST BE IN ACCORD WITH DS_CONFIG! If use_deepspeed_adam=true, set true for CPU Adam, false for GPU FusedAdam.
+
+    # --- Generation Hyperparameters (for predict_step) ---
+    predict_max_length: 128           # Max sequence length for generated text (prompt + new tokens).
+    predict_num_beams: 1              # Number of beams for generation (1 = greedy, >1 = beam search).
+    # You can add more HuggingFace `generate()` parameters here if needed, e.g.:
+    # predict_do_sample: true
+    # predict_top_k: 50
+    # predict_top_p: 0.95
+    # predict_temperature: 0.7
+    DEBUG_MODE: False
+
+datamodule:
+  # --- Keyword arguments passed to the LightningDataModule's __init__ ---
+  kwargs:
+    # dataset_configs defines which datasets from my_datasets.py to use and their specific settings
+    dataset_configs:
+      wikitext: {} # Use default wikitext-2-raw-v1 splits
+      oscar:
+        train_split_percentage: [0.001,0.002] # Use 0.1% of OSCAR english train split
+      #bookcorpus: {} # Uncomment to include bookcorpus
+    batch_size: 8       # Per GPU batch size (adjust based on GPU memory)
+    max_length: 128     # Max sequence length for tokenization
+    num_workers: 25      # Dataloader workers per process (adjust based on CPU/IO)
+    cache_dir: "data/main_cache" # Relative to project root (resolved in train.py)
+
+trainer:
+  # --- Arguments for the PyTorch Lightning Trainer ---
+  max_epochs: 3
+  max_steps: -1 # If > 0, overrides max_epochs
+  accelerator: "gpu" # "gpu" or "cpu"
+  devices: "auto" # Let PL/Ray handle device assignment (will be 1 per Ray worker)
+  precision: "16-mixed" # "bf16-mixed", "16-mixed", "32-true", "64-true"
+  gradient_clip_val: 1.0 # Optional gradient clipping
+  val_check_interval: 0.25 # Check validation set every 25% of a training epoch
+  log_every_n_steps: 20
+  accumulate_grad_batches: 1 # Increase for gradient accumulation
+
+strategy:
+  # --- Configuration for the Lightning Strategy ---
+  name: "deepspeed" # "deepspeed", "ddp", "fsdp", "auto" 
+  config_path: "config/ds_config.jsonc" # Path to DeepSpeed JSON (relative to project root)
+  find_unused_parameters: false # Set to true if encountering issues with model layers not having grads
+
+ray:
+  # --- Configuration for Ray Train ---
+  use_ray: true # Set to false to run locally using standard Pytorch Lightning Trainer
+  address: "auto" # Or specify the head node address "ray://<head_node_ip>:10001"
+  num_workers: 2 # Number of Ray worker processes (e.g., number of nodes * gpus_per_node)
+  cpus_per_worker: 8 # Number of CPUs allocated to each Ray worker process
+  # GPU requested based on trainer.accelerator setting
+  storage_path: "/tmp/ray_train_results" # Shared path for Ray logs/checkpoints (use NFS or cloud storage)
+

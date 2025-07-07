@@ -1,21 +1,24 @@
-# Example train_config.yaml
+# =========================================================================
+# Unified Training Configuration
+# =========================================================================
+# This file is the single source of truth for a training run.
+# It uses the "inline DeepSpeed config" approach for maximum clarity
+# and stability, preventing conflicts between PyTorch Lightning and DeepSpeed.
+# -------------------------------------------------------------------------
 
 run:
   seed: 42
   project: "llm-multinode-training" # Wandb project name
   run_name: "gpt2-wikitext-oscar-test" # Wandb run name (can be dynamic)
   use_wandb: true
-  wandb_log_model: false # Usually false for large models
-  checkpoint_dir: "outputs/checkpoints/" # Relative to project root
-  checkpoint_monitor: "val_loss"
-  checkpoint_mode: "min"
-  save_top_k: 2
-  save_last_checkpoint: true
-  use_early_stopping: true
-  early_stop_monitor: "val_loss"
-  early_stop_patience: 5
-  early_stop_mode: "min"
-  lr_monitor_logging_interval: "step" # or "epoch"
+  wandb_log_model: false # Logging model artifacts can be slow and use a lot of space.
+  lr_monitor_logging_interval: "step" # Log learning rate every step.
+
+  # --- Ray Train Checkpointing ---
+  # These are handled by Ray Train's RunConfig, not PyTorch Lightning's callbacks.
+  ray_checkpoint_monitor: "val_loss" # Metric Ray Train watches to save the best checkpoint.
+  ray_checkpoint_mode: "min"         # "min" for loss/perplexity, "max" for accuracy.
+  ray_checkpoint_num_to_keep: 2      # Number of best checkpoints to keep.
 
 model:
   # --- Specify which model class to use ---
@@ -25,72 +28,140 @@ model:
   # --- Keyword arguments passed to the model's __init__ ---
   kwargs:
     # --- Core Model & Tokenizer Specification ---
-    model_name_or_path: "gpt2"      # (e.g., "gpt2", "distilgpt2", "EleutherAI/gpt-neo-125M")
-    # tokenizer_name_or_path: null  # Optional: Only if tokenizer is different from model.
-                                    #           If null/absent, uses model_name_or_path.
-    model_cache_dir: "data/model_cache"  # Optional: Path to HuggingFace model cache.
-                                         #           If null/absent, uses HF default.
-    tokenizer_cache_dir: "data/model_cache" # Optional: Path to HuggingFace tokenizer cache.
-                                             #            If null/absent, uses HF default.
+    model_name_or_path: "gpt2"
+    model_cache_dir: "data/model_cache"
+    tokenizer_cache_dir: "data/model_cache"
 
-    # --- Training Hyperparameters ---
-    learning_rate: 5.0e-5
-    weight_decay: 0.01
-    adam_epsilon: 1.0e-8
-    warmup_steps_ratio: 0.06          # Ratio of total training steps for linear warmup (e.g., 0.06 for 6%). Set to 0.0 for no warmup.
-
-    # --- Optimizer Selection (DeepSpeed related) ---
-    use_deepspeed_adam: true          # Whether to try using DeepSpeed's Adam optimizers.
-    prefer_cpu_adam: false            # If use_deepspeed_adam=true, set true for CPU Adam, false for GPU FusedAdam.
+    # --- Optimizer & Scheduler Hyperparameters ---
+    # NOTE: All optimizer and scheduler settings have been moved to the
+    # 'strategy.config_dict' section below. This allows DeepSpeed to manage
+    # them natively, which is more robust and performant. Your LightningModule's
+    # 'configure_optimizers' method should now simply return None.
 
     # --- Generation Hyperparameters (for predict_step) ---
-    predict_max_length: 128           # Max sequence length for generated text (prompt + new tokens).
-    predict_num_beams: 1              # Number of beams for generation (1 = greedy, >1 = beam search).
-    # You can add more HuggingFace `generate()` parameters here if needed, e.g.:
-    # predict_do_sample: true
-    # predict_top_k: 50
-    # predict_top_p: 0.95
-    # predict_temperature: 0.7
+    predict_max_length: 128
+    predict_num_beams: 1
     DEBUG_MODE: False
 
 datamodule:
-  # --- Keyword arguments passed to the LightningDataModule's __init__ ---
   kwargs:
-    # dataset_configs defines which datasets from my_datasets.py to use and their specific settings
     dataset_configs:
-      wikitext: {} # Use default wikitext-2-raw-v1 splits
+      wikitext: {}
       oscar:
-        train_split_percentage: [0.001,0.002] # Use 0.1% of OSCAR english train split
-      #bookcorpus: {} # Uncomment to include bookcorpus
-    batch_size: 8       # Per GPU batch size (adjust based on GPU memory)
-    max_length: 128     # Max sequence length for tokenization
-    num_workers: 25      # Dataloader workers per process (adjust based on CPU/IO)
-    cache_dir: "data/main_cache" # Relative to project root (resolved in train.py)
+        train_split_percentage: [0.001, 0.002]
+    
+    # This MUST match 'train_micro_batch_size_per_gpu' in the DeepSpeed config below.
+    batch_size: 4
+    
+    max_length: 128
+    num_workers: 25
+    cache_dir: "data/main_cache"
 
 trainer:
+  # Runs one training batch and one validation batch then exits.
+  fast_dev_run: false
+  # Track the L2 norm of the gradients. It will automatically appear in W&B.
+  track_grad_norm: 2
+
   # --- Arguments for the PyTorch Lightning Trainer ---
   max_epochs: 3
-  max_steps: -1 # If > 0, overrides max_epochs
-  accelerator: "gpu" # "gpu" or "cpu"
-  devices: "auto" # Let PL/Ray handle device assignment (will be 1 per Ray worker)
-  precision: "16-mixed" # "bf16-mixed", "16-mixed", "32-true", "64-true"
-  gradient_clip_val: 1.0 # Optional gradient clipping
-  val_check_interval: 0.25 # Check validation set every 25% of a training epoch
+  max_steps: -1 # If > 0, this overrides max_epochs.
+  accelerator: "gpu"
+  devices: "auto" # Let PL/Ray handle it. Will be 1 per worker.
+  
+  # 'bf16-mixed' is generally preferred on modern GPUs (A100/H100).
+  # '16-mixed' is for older GPUs.
+  precision: "16-mixed"
+  # NOTE: 'gradient_clip_val' is now handled by 'gradient_clipping' in the DeepSpeed config.
+  # gradient_clip_val: 1.0
+  val_check_interval: 200
   log_every_n_steps: 20
-  # accumulate_grad_batches: 1 # Increase for gradient accumulation
+
+  # This tells Lightning how many batches to process before performing an optimizer step.
+  # This value is used by DeepSpeed to calculate the effective global batch size.
+  # Global Batch Size = (train_micro_batch_size_per_gpu * num_workers * accumulate_grad_batches)
+  accumulate_grad_batches: 2
 
 strategy:
   # --- Configuration for the Lightning Strategy ---
-  name: "deepspeed" # "deepspeed", "ddp", "fsdp", "auto" 
-  config_path: "config/ds_config.json" # Path to DeepSpeed JSON (relative to project root)
-  find_unused_parameters: false # Set to true if encountering issues with model layers not having grads
+  name: "deepspeed"
+  find_unused_parameters: false
+
+  # --- INLINE DEEPSPEED CONFIG ---
+  # By defining the config here, we avoid a separate .json file and can add comments.
+  # Your train.py script is already set up to read from 'config_dict' if it exists.
+  config_dict:
+    # --- Batch Size and Precision ---
+    # This is the actual batch size processed by one GPU in a single forward/backward pass.
+    # It must match 'datamodule.kwargs.batch_size' for correct data loading.
+    train_micro_batch_size_per_gpu: 4
+    fp16:
+      enabled: true
+      
+    # --- Gradient Clipping and Accumulation ---
+    # NOTE: 'gradient_accumulation_steps' is NOT set here.
+    # Lightning controls this via 'trainer.accumulate_grad_batches'.
+    gradient_clipping: 1.0
+
+    # --- Optimizer Configuration ---
+    # DeepSpeed will create and manage the optimizer internally.
+    optimizer:
+      type: "AdamW" # The recommended optimizer for transformers.
+      params:
+        lr: 5.0e-5
+        betas: [0.9, 0.999]
+        eps: 1.0e-8
+        weight_decay: 0.01
+
+    # --- Scheduler Configuration ---
+    # DeepSpeed also manages the learning rate scheduler.
+    scheduler:
+      type: "WarmupLR" # A standard linear warmup and decay schedule.
+      params:
+        warmup_min_lr: 0
+        warmup_max_lr: 5.0e-5 # Should match the peak LR in the optimizer.
+        # This needs to be calculated: (warmup_ratio * total_training_steps).
+        # Example: 6% warmup for 100k steps = 6000.
+        warmup_num_steps: 6000
+
+    # --- ZeRO (Zero Redundancy Optimizer) Configuration ---
+    zero_optimization:
+      # Stage 3 is the most memory-efficient: it partitions model weights,
+      # gradients, AND optimizer states across all GPUs. Essential for huge models.
+      stage: 3
+
+      # Offload optimizer state and parameters to regular CPU RAM.
+      # This is critical for fitting massive models that don't fit in VRAM.
+      # DeepSpeed will automatically use a CPU-Adam optimizer when this is enabled.
+      offload_optimizer:
+        device: "none"
+        pin_memory: true
+      offload_param:
+        device: "none" #none, cpu, nvme
+        pin_memory: true
+
+      # --- Advanced Performance Tuning for Stage 3 ---
+      overlap_comm: true            # Overlap communication with computation.
+      contiguous_gradients: true    # Reduces memory fragmentation.
+      reduce_bucket_size: 500_000_000        # YAML IS RETARDED DOESN't understand 5e8 .Size of buckets for gradient reduction.
+      stage3_prefetch_bucket_size: 500_000_000  # Size of buckets for parameter prefetching.
+      stage3_param_persistence_threshold: 1_000_000   # Keep small params on GPU.
+
+callbacks:
+  generation_logger:
+    # Set to false to completely disable this callback for fast runs.
+    # Set to true to enable it for qualitative evaluation.
+    enabled: false 
+    # Choose from 'default', 'creative', 'qa', 'code'
+    prompt_set_name: "default" 
+    # Set to a positive integer to log during validation, e.g., every 50 batches.
+    # Set to -1 or 0 to only log at the end of the entire validation run.
+    log_every_n_steps: -1
 
 ray:
   # --- Configuration for Ray Train ---
-  use_ray: true # Set to false to run locally using standard Pytorch Lightning Trainer
-  address: "auto" # Or specify the head node address "ray://<head_node_ip>:10001"
-  num_workers: 2 # Number of Ray worker processes (e.g., number of nodes * gpus_per_node)
-  cpus_per_worker: 8 # Number of CPUs allocated to each Ray worker process
-  # GPU requested based on trainer.accelerator setting
-  storage_path: "/tmp/ray_train_results" # Shared path for Ray logs/checkpoints (use NFS or cloud storage)
-
+  use_ray: true
+  address: "auto"
+  num_workers: 2      # Total number of GPUs you want to use for training.
+  cpus_per_worker: 8  # CPUs for data loading and other tasks on each worker.
+  storage_path: "/tmp/ray_train_results"

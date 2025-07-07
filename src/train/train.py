@@ -60,6 +60,8 @@ except ImportError as e:
 try:
     from src.data.data_manager import LightningDataModule
     from src.utils.utils import setup_logging
+    from src.callbacks.generation_logger import GenerationLogger
+    from src.callbacks.deepspeed_monitor import DeepSpeedMonitor
 
 except ImportError as e:
     logging.error(f"Failed to import LightningDataModule or setup_logging: {e}")
@@ -110,6 +112,7 @@ def train_func_for_ray(train_loop_worker_config: dict):
     cfg_trainer_params = train_loop_worker_config["trainer_params"] # Args for pl.Trainer
     cfg_strategy = train_loop_worker_config["strategy_config"]
     cfg_run_settings = train_loop_worker_config["run_settings"] # General run settings
+    cfg_callbacks = train_loop_worker_config.get("callbacks_config", {})
 
     # Seed
     pl.seed_everything(cfg_run_settings.get("seed", 42) + worker_rank, workers=True)
@@ -166,6 +169,20 @@ def train_func_for_ray(train_loop_worker_config: dict):
     callbacks = [ray.train.lightning.RayTrainReportCallback()]
     if cfg_run_settings.get("lr_monitor_logging_interval"):
         callbacks.append(LearningRateMonitor(logging_interval=cfg_run_settings.get("lr_monitor_logging_interval")))
+    
+    # ----- Deepspeed monitor gradients norm -----
+    callbacks.append(DeepSpeedMonitor())
+
+    if "generation_logger" in cfg_callbacks:
+        gen_logger_cfg = cfg_callbacks["generation_logger"].copy() # Use .copy() for safety
+        
+        # Check for the 'enabled' flag. Default to False if not present.
+        if gen_logger_cfg.pop("enabled", False): 
+            # '.pop()' removes the 'enabled' key so it's not passed to the constructor.
+            logging.info(f"[Worker {worker_rank}] GenerationLogger is ENABLED. Initializing with config: {gen_logger_cfg}")
+            callbacks.append(GenerationLogger(**gen_logger_cfg))
+        else:
+            logging.info(f"[Worker {worker_rank}] GenerationLogger is DISABLED via config.")
 
     # Logger - Only for global rank 0 worker
     pl_logger = None
@@ -179,10 +196,10 @@ def train_func_for_ray(train_loop_worker_config: dict):
 
     # PL Trainer arguments
     trainer_actual_args = {
-        "accelerator": cfg_trainer_params.get("accelerator", "auto"), # e.g., "gpu"
-        "devices": "auto",  # Ray sets CUDA_VISIBLE_DEVICES, PL "auto" uses 1 device per worker
+        "accelerator": cfg_trainer_params.get("accelerator", "auto"),
+        "devices": "auto",
         "strategy": pl_strategy_object,
-        "plugins": [ray.train.lightning.RayLightningEnvironment()], # ESSENTIAL
+        "plugins": [ray.train.lightning.RayLightningEnvironment()],
         "callbacks": callbacks,
         "logger": pl_logger,
         "precision": cfg_trainer_params.get("precision", "16-mixed"),
@@ -190,8 +207,16 @@ def train_func_for_ray(train_loop_worker_config: dict):
         "max_steps": cfg_trainer_params.get("max_steps", -1),
         "val_check_interval": cfg_trainer_params.get("val_check_interval", 1.0),
         "log_every_n_steps": cfg_trainer_params.get("log_every_n_steps", 50),
-        "gradient_clip_val": cfg_trainer_params.get("gradient_clip_val", None),
-        "enable_checkpointing": False,  # Per Ray docs, RayTrainReportCallback handles checkpoints
+        
+        # --- CHANGES ARE HERE ---
+        # 1. ADD this line to control accumulation from the trainer config
+        "accumulate_grad_batches": cfg_trainer_params.get("accumulate_grad_batches", 1),
+
+        # 2. REMOVE this line. DeepSpeed now controls gradient clipping via its own config.
+        # "gradient_clip_val": cfg_trainer_params.get("gradient_clip_val", None),
+        
+        "enable_checkpointing": False, # Per Ray docs, RayTrainReportCallback handles checkpoints
+        "fast_dev_run": cfg_trainer_params.get("fast_dev_run", False),
     }
     if trainer_actual_args["max_epochs"] == -1 and trainer_actual_args["max_steps"] == -1:
         trainer_actual_args["max_epochs"] = 1 # Default
@@ -262,6 +287,7 @@ def main(config: dict):
             "trainer_params": trainer_params_from_config,
             "strategy_config": config.get("strategy", {}),
             "run_settings": run_settings, # For WandB project name, LRMonitor interval etc.
+            "callbacks_config": config.get("callbacks", {}),
         }
 
         # Scaling Config for Ray Train
@@ -335,6 +361,8 @@ def main(config: dict):
 if __name__ == "__main__":
     logging.info("--- Initializing Training Script ---")
     script_start_time = time.time()
+    os.environ["RAY_DEDUP_LOGS"] = "0" 
+    logging.info("RAY_DEDUP_LOGS set to 0. Log deduplication is DISABLED.")
     try:
         setup_logging(level=logging.INFO) # Or DEBUG for more verbosity
     except NameError:

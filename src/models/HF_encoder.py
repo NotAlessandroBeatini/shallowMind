@@ -138,52 +138,62 @@ class HuggingFaceEncoderModel(pl.LightningModule):
         return {"logits": outputs.logits, "input_ids": batch["input_ids"]} # Return logits and inputs
 
     def configure_optimizers(self):
-        """Configures the optimizer, adding DeepSpeed Adam support."""
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
-                "weight_decay": self.hparams.weight_decay,
-            },
-            {
-                "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
-                "weight_decay": 0.0,
-            },
-        ]
+        """
+        This method is required by PyTorch Lightning, but we are letting the
+        DeepSpeed strategy handle the optimizer and scheduler creation based
+        on the 'strategy.config_dict' in the main YAML config file.
+        
+        Therefore, we simply do nothing here.
+        """
+        pass 
+    
+    # def configure_optimizers(self):
+    #     """Configures the optimizer, adding DeepSpeed Adam support."""
+    #     no_decay = ["bias", "LayerNorm.weight"]
+    #     optimizer_grouped_parameters = [
+    #         {
+    #             "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
+    #             "weight_decay": self.hparams.weight_decay,
+    #         },
+    #         {
+    #             "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
+    #             "weight_decay": 0.0,
+    #         },
+    #     ]
 
-        # --- Select Optimizer Class ---
-        OptimizerClass = torch.optim.AdamW # Default fallback
-        optimizer_kwargs = {
-            "lr": self.hparams.learning_rate,
-            "eps": self.hparams.adam_epsilon,
-        }
+    #     # --- Select Optimizer Class ---
+    #     OptimizerClass = torch.optim.AdamW # Default fallback
+    #     optimizer_kwargs = {
+    #         "lr": self.hparams.learning_rate,
+    #         "eps": self.hparams.adam_epsilon,
+    #     }
 
-        if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
-            if self.hparams.prefer_cpu_adam:
-                if DeepSpeedCPUAdam:
-                    OptimizerClass = DeepSpeedCPUAdam
-                    optimizer_kwargs["adamw_mode"] = True
-                    self.print("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
-                else:
-                    self.print("DeepSpeedCPUAdam requested but not available, falling back to AdamW.")
-            else:
-                if FusedAdam:
-                    OptimizerClass = FusedAdam
-                    optimizer_kwargs["adam_w_mode"] = True
-                    self.print("Using FusedAdam optimizer (GPU).")
-                else:
-                    self.print("FusedAdam requested but not available, falling back to AdamW.")
-        else:
-             self.print(f"Using standard torch.optim.AdamW optimizer. use_deepspeed_adam={self.hparams.use_deepspeed_adam}, HAS_DEEPSPEED={HAS_DEEPSPEED}")
+    #     if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
+    #         if self.hparams.prefer_cpu_adam:
+    #             if DeepSpeedCPUAdam:
+    #                 OptimizerClass = DeepSpeedCPUAdam
+    #                 optimizer_kwargs["adamw_mode"] = True
+    #                 self.print("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
+    #             else:
+    #                 self.print("DeepSpeedCPUAdam requested but not available, falling back to AdamW.")
+    #         else:
+    #             if FusedAdam:
+    #                 OptimizerClass = FusedAdam
+    #                 optimizer_kwargs["adam_w_mode"] = True
+    #                 self.print("Using FusedAdam optimizer (GPU).")
+    #             else:
+    #                 self.print("FusedAdam requested but not available, falling back to AdamW.")
+    #     else:
+    #          self.print(f"Using standard torch.optim.AdamW optimizer. use_deepspeed_adam={self.hparams.use_deepspeed_adam}, HAS_DEEPSPEED={HAS_DEEPSPEED}")
 
 
-        optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
+    #     optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
 
-        # --- Optional: Learning Rate Scheduler ---
-        # scheduler = ...
-        # return {"optimizer": optimizer, "lr_scheduler": ...}
+    #     # --- Optional: Learning Rate Scheduler ---
+    #     # scheduler = ...
+    #     # return {"optimizer": optimizer, "lr_scheduler": ...}
 
-        return optimizer
+    #     return optimizer
 
 # For quick testing
 if __name__ == "__main__":

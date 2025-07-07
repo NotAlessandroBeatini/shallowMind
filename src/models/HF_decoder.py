@@ -128,61 +128,70 @@ class HuggingFaceLLM(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        """Configures the optimizer and learning rate scheduler."""
-        # Filter out parameters that don't require gradients (if any)
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
-                "weight_decay": self.hparams.weight_decay,
-            },
-            {
-                "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
-                "weight_decay": 0.0,
-            },
-        ]
+        """
+        This method is required by PyTorch Lightning, but we are letting the
+        DeepSpeed strategy handle the optimizer and scheduler creation based
+        on the 'strategy.config_dict' in the main YAML config file.
+        
+        Therefore, we simply do nothing here.
+        """
+        pass 
+    # def configure_optimizers(self):
+    #     """Configures the optimizer and learning rate scheduler."""
+    #     # Filter out parameters that don't require gradients (if any)
+    #     no_decay = ["bias", "LayerNorm.weight"]
+    #     optimizer_grouped_parameters = [
+    #         {
+    #             "params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
+    #             "weight_decay": self.hparams.weight_decay,
+    #         },
+    #         {
+    #             "params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
+    #             "weight_decay": 0.0,
+    #         },
+    #     ]
 
-        # --- Select Optimizer Class ---
-        OptimizerClass = torch.optim.AdamW # Default fallback
-        optimizer_kwargs = {
-            "lr": self.hparams.learning_rate,
-            "eps": self.hparams.adam_epsilon,
-            # weight_decay is handled by parameter groups
-        }
+    #     # --- Select Optimizer Class ---
+    #     OptimizerClass = torch.optim.AdamW # Default fallback
+    #     optimizer_kwargs = {
+    #         "lr": self.hparams.learning_rate,
+    #         "eps": self.hparams.adam_epsilon,
+    #         # weight_decay is handled by parameter groups
+    #     }
 
-        if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
-            if self.hparams.prefer_cpu_adam:
-                if DeepSpeedCPUAdam:
-                    OptimizerClass = DeepSpeedCPUAdam
-                    # DeepSpeedCPUAdam might have different args, adjust kwargs if needed
-                    optimizer_kwargs["adamw_mode"] = True # Usually needed
-                    self.print("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
-                else:
-                    self.print("DeepSpeedCPUAdam requested but not available, falling back to AdamW.")
-            else:
-                if FusedAdam:
-                    OptimizerClass = FusedAdam
-                     # FusedAdam might have different args, adjust kwargs if needed
-                    optimizer_kwargs["adam_w_mode"] = True # Usually needed
-                    self.print("Using FusedAdam optimizer (GPU).")
-                else:
-                    self.print("FusedAdam requested but not available, falling back to AdamW.")
-        else:
-             self.print(f"Using standard torch.optim.AdamW optimizer. use_deepspeed_adam={self.hparams.use_deepspeed_adam}, HAS_DEEPSPEED={HAS_DEEPSPEED}")
+    #     if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
+    #         if self.hparams.prefer_cpu_adam:
+    #             if DeepSpeedCPUAdam:
+    #                 OptimizerClass = DeepSpeedCPUAdam
+    #                 # DeepSpeedCPUAdam might have different args, adjust kwargs if needed
+    #                 optimizer_kwargs["adamw_mode"] = True # Usually needed
+    #                 self.print("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
+    #             else:
+    #                 self.print("DeepSpeedCPUAdam requested but not available, falling back to AdamW.")
+    #         else:
+    #             if FusedAdam:
+    #                 OptimizerClass = FusedAdam
+    #                  # FusedAdam might have different args, adjust kwargs if needed
+    #                 optimizer_kwargs["adam_w_mode"] = True # Usually needed
+    #                 self.print("Using FusedAdam optimizer (GPU).")
+    #             else:
+    #                 self.print("FusedAdam requested but not available, falling back to AdamW.")
+    #     else:
+    #          self.print(f"Using standard torch.optim.AdamW optimizer. use_deepspeed_adam={self.hparams.use_deepspeed_adam}, HAS_DEEPSPEED={HAS_DEEPSPEED}")
 
 
-        optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
+    #     optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
 
-        # --- Optional: Learning Rate Scheduler ---
-        # Example: Linear warmup and decay
-        # scheduler = get_linear_schedule_with_warmup(
-        #     optimizer, num_warmup_steps=self.hparams.warmup_steps, num_training_steps=self.trainer.estimated_stepping_batches
-        # )
-        # scheduler_config = {"scheduler": scheduler, "interval": "step", "frequency": 1}
-        # return {"optimizer": optimizer, "lr_scheduler": scheduler_config}
+    #     # --- Optional: Learning Rate Scheduler ---
+    #     # Example: Linear warmup and decay
+    #     # scheduler = get_linear_schedule_with_warmup(
+    #     #     optimizer, num_warmup_steps=self.hparams.warmup_steps, num_training_steps=self.trainer.estimated_stepping_batches
+    #     # )
+    #     # scheduler_config = {"scheduler": scheduler, "interval": "step", "frequency": 1}
+    #     # return {"optimizer": optimizer, "lr_scheduler": scheduler_config}
 
-        # Return only optimizer if no scheduler is used
-        return optimizer
+    #     # Return only optimizer if no scheduler is used
+    #     return optimizer
 
 
 # For quick local testing

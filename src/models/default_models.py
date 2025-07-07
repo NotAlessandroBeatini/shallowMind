@@ -174,14 +174,41 @@ class HuggingFaceLLM(pl.LightningModule):
         return loss
 
     def _do_logging(self, name: str, value: Any, **kwargs):
-        if not self._debug_mode and self.trainer and hasattr(self.trainer, 'logger_connector'):
+        """
+        A wrapper for self.log() that handles different logging backends
+        based on the execution context (real training vs. local debug).
+        """
+        # --- Main Logging Path for W&B ---
+        # We expect to enter this block during a real training run.
+        if not self._debug_mode and self.trainer and self.trainer.loggers:
             self.log(name, value, **kwargs)
+
+        # --- Fallback for Local Debugging (e.g., if __name__ == "__main__") ---
         elif self._debug_mode:
-            log_str = f"[Local Test] {name}: {value}"
-            if "prog_bar" in kwargs and kwargs["prog_bar"]: log_str += " (prog_bar)"
-            if "on_step" in kwargs and kwargs["on_step"]: log_str += " (on_step)"
-            if "on_epoch" in kwargs and kwargs["on_epoch"]: log_str += " (on_epoch)"
+            log_str = f"[Local Debug] {name}: {value}"
+            if kwargs.get("prog_bar"): log_str += " (prog_bar)"
+            if kwargs.get("on_step"): log_str += " (on_step)"
+            if kwargs.get("on_epoch"): log_str += " (on_epoch)"
             logger.info(log_str)
+            
+        # --- NEW: Diagnostic block if logging is skipped during a real run ---
+        # This 'else' will only be reached if 'not self._debug_mode' is True,
+        # but the trainer or logger is not available.
+        else:
+            # Use a flag to ensure this detailed warning is printed only once.
+            if not hasattr(self, '_logging_warning_printed'):
+                self._printer("\n" + "="*80)
+                self._printer("!!! LOGGING SKIPPED (NON-DEBUG MODE) !!!")
+                self._printer(f"W&B logging for '{name}' was skipped because the condition was not met.")
+                self._printer(f"  - self._debug_mode: {self._debug_mode}")
+                self._printer(f"  - self.trainer is attached: {self.trainer is not None}")
+                if self.trainer:
+                    self._printer(f"  - self.trainer.loggers is available: {self.trainer.loggers}")
+                self._printer("This warning will not be shown again for this run.")
+                self._printer("="*80 + "\n")
+                
+                # Set the flag to prevent spamming the log.
+                self._logging_warning_printed = True
 
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         loss = self._common_step(batch, batch_idx, "train")
@@ -196,7 +223,9 @@ class HuggingFaceLLM(pl.LightningModule):
 
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
         loss = self._common_step(batch, batch_idx, "val")
+        perplexity = torch.exp(loss) # Calculate perplexity
         self._do_logging("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self._do_logging("val_perplexity", perplexity, on_epoch=True)
 
     def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
         loss = self._common_step(batch, batch_idx, "test")
@@ -247,42 +276,51 @@ class HuggingFaceLLM(pl.LightningModule):
         return generated_texts
 
     def configure_optimizers(self):
-        no_decay = ["bias", "LayerNorm.weight", "embedding.weight"]
-        optimizer_grouped_parameters = [
-            {"params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad], "weight_decay": self.hparams.weight_decay,},
-            {"params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad], "weight_decay": 0.0,},
-        ]
-        OptimizerClass = torch.optim.AdamW
-        optimizer_kwargs = {"lr": self.hparams.learning_rate, "eps": self.hparams.adam_epsilon}
-        if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
-            if self.hparams.prefer_cpu_adam and DeepSpeedCPUAdam:
-                OptimizerClass, optimizer_kwargs["adamw_mode"] = DeepSpeedCPUAdam, True
-                self._printer("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
-            elif not self.hparams.prefer_cpu_adam and FusedAdam:
-                OptimizerClass, optimizer_kwargs["adam_w_mode"] = FusedAdam, True
-                self._printer("Using FusedAdam optimizer (GPU).")
-            else: self._printer(f"DeepSpeed Adam requested but specific type not available/preferred. Falling back to AdamW.")
-        else: self._printer(f"Using standard torch.optim.AdamW optimizer.")
-        optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
+        """
+        This method is required by PyTorch Lightning, but we are letting the
+        DeepSpeed strategy handle the optimizer and scheduler creation based
+        on the 'strategy.config_dict' in the main YAML config file.
+        
+        Therefore, we simply do nothing here.
+        """
+        pass 
+    # def configure_optimizers(self):
+    #     no_decay = ["bias", "LayerNorm.weight", "embedding.weight"]
+    #     optimizer_grouped_parameters = [
+    #         {"params": [p for n, p in self.model.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad], "weight_decay": self.hparams.weight_decay,},
+    #         {"params": [p for n, p in self.model.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad], "weight_decay": 0.0,},
+    #     ]
+    #     OptimizerClass = torch.optim.AdamW
+    #     optimizer_kwargs = {"lr": self.hparams.learning_rate, "eps": self.hparams.adam_epsilon}
+    #     if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
+    #         if self.hparams.prefer_cpu_adam and DeepSpeedCPUAdam:
+    #             OptimizerClass, optimizer_kwargs["adamw_mode"] = DeepSpeedCPUAdam, True
+    #             self._printer("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
+    #         elif not self.hparams.prefer_cpu_adam and FusedAdam:
+    #             OptimizerClass, optimizer_kwargs["adam_w_mode"] = FusedAdam, True
+    #             self._printer("Using FusedAdam optimizer (GPU).")
+    #         else: self._printer(f"DeepSpeed Adam requested but specific type not available/preferred. Falling back to AdamW.")
+    #     else: self._printer(f"Using standard torch.optim.AdamW optimizer.")
+    #     optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
 
-        if self.hparams.warmup_steps_ratio > 0:
-            num_training_steps = -1
-            if self.trainer and hasattr(self.trainer, 'estimated_stepping_batches') and self.trainer.estimated_stepping_batches is not None and self.trainer.estimated_stepping_batches > 0 :
-                num_training_steps = self.trainer.estimated_stepping_batches
-                self._printer(f"Scheduler: Estimated total training steps from estimated_stepping_batches: {num_training_steps}")
-            elif self.trainer and hasattr(self.trainer, 'max_steps') and self.trainer.max_steps is not None and self.trainer.max_steps > 0 :
-                num_training_steps = self.trainer.max_steps
-                self._printer(f"Scheduler: Using max_steps for total training steps: {num_training_steps}")
-            if num_training_steps <=0 :
-                 self._printer(f"Warning: num_training_steps ({num_training_steps}) is not positive or could not be determined. Scheduler disabled.")
-                 return optimizer
-            num_warmup_steps = int(self.hparams.warmup_steps_ratio * num_training_steps)
-            self._printer(f"Scheduler: Warmup steps: {num_warmup_steps}, Total steps: {num_training_steps}")
-            scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
-            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step", "frequency": 1}}
-        else:
-            self._printer("No warmup configured for LR scheduler.")
-            return optimizer
+    #     if self.hparams.warmup_steps_ratio > 0:
+    #         num_training_steps = -1
+    #         if self.trainer and hasattr(self.trainer, 'estimated_stepping_batches') and self.trainer.estimated_stepping_batches is not None and self.trainer.estimated_stepping_batches > 0 :
+    #             num_training_steps = self.trainer.estimated_stepping_batches
+    #             self._printer(f"Scheduler: Estimated total training steps from estimated_stepping_batches: {num_training_steps}")
+    #         elif self.trainer and hasattr(self.trainer, 'max_steps') and self.trainer.max_steps is not None and self.trainer.max_steps > 0 :
+    #             num_training_steps = self.trainer.max_steps
+    #             self._printer(f"Scheduler: Using max_steps for total training steps: {num_training_steps}")
+    #         if num_training_steps <=0 :
+    #              self._printer(f"Warning: num_training_steps ({num_training_steps}) is not positive or could not be determined. Scheduler disabled.")
+    #              return optimizer
+    #         num_warmup_steps = int(self.hparams.warmup_steps_ratio * num_training_steps)
+    #         self._printer(f"Scheduler: Warmup steps: {num_warmup_steps}, Total steps: {num_training_steps}")
+    #         scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
+    #         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step", "frequency": 1}}
+    #     else:
+    #         self._printer("No warmup configured for LR scheduler.")
+    #         return optimizer
 
 # --- Example for local testing (Optional) ---
 if __name__ == "__main__":

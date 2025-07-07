@@ -288,73 +288,82 @@ class CustomModelTemplate(pl.LightningModule):
         # Could implement generation logic if it's a generative model
         return output
 
-
     def configure_optimizers(self):
-        """
-        Configures the optimizer and optional learning rate scheduler.
-        Reuses the robust logic from previous examples.
-        """
-        # Filter out parameters that don't require gradients
-        # Apply weight decay only to certain parameters (e.g., not biases and LayerNorms)
-        no_decay = ["bias", "LayerNorm.weight", "embedding.weight"] # Often exclude embedding weight too
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in self.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
-                "weight_decay": self.hparams.weight_decay,
-            },
-            {
-                "params": [p for n, p in self.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
-                "weight_decay": 0.0,
-            },
-        ]
+            """
+            This method is required by PyTorch Lightning, but we are letting the
+            DeepSpeed strategy handle the optimizer and scheduler creation based
+            on the 'strategy.config_dict' in the main YAML config file.
+            
+            Therefore, we simply do nothing here.
+            """
+            pass 
 
-        # --- Select Optimizer Class ---
-        OptimizerClass = torch.optim.AdamW # Default fallback
-        optimizer_kwargs = {
-            "lr": self.hparams.learning_rate,
-            "eps": self.hparams.adam_epsilon,
-        }
+    # def configure_optimizers(self):
+    #     """
+    #     Configures the optimizer and optional learning rate scheduler.
+    #     Reuses the robust logic from previous examples.
+    #     """
+    #     # Filter out parameters that don't require gradients
+    #     # Apply weight decay only to certain parameters (e.g., not biases and LayerNorms)
+    #     no_decay = ["bias", "LayerNorm.weight", "embedding.weight"] # Often exclude embedding weight too
+    #     optimizer_grouped_parameters = [
+    #         {
+    #             "params": [p for n, p in self.named_parameters() if not any(nd in n for nd in no_decay) and p.requires_grad],
+    #             "weight_decay": self.hparams.weight_decay,
+    #         },
+    #         {
+    #             "params": [p for n, p in self.named_parameters() if any(nd in n for nd in no_decay) and p.requires_grad],
+    #             "weight_decay": 0.0,
+    #         },
+    #     ]
 
-        if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
-            if self.hparams.prefer_cpu_adam:
-                if DeepSpeedCPUAdam:
-                    OptimizerClass = DeepSpeedCPUAdam
-                    optimizer_kwargs["adamw_mode"] = True
-                    self.print("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
-                else:
-                    self.print("DeepSpeedCPUAdam requested but not available, falling back to AdamW.")
-            else:
-                if FusedAdam:
-                    OptimizerClass = FusedAdam
-                    optimizer_kwargs["adam_w_mode"] = True
-                    self.print("Using FusedAdam optimizer (GPU).")
-                else:
-                    self.print("FusedAdam requested but not available, falling back to AdamW.")
-        else:
-             self.print(f"Using standard torch.optim.AdamW optimizer.")
+    #     # --- Select Optimizer Class ---
+    #     OptimizerClass = torch.optim.AdamW # Default fallback
+    #     optimizer_kwargs = {
+    #         "lr": self.hparams.learning_rate,
+    #         "eps": self.hparams.adam_epsilon,
+    #     }
+
+    #     if self.hparams.use_deepspeed_adam and HAS_DEEPSPEED:
+    #         if self.hparams.prefer_cpu_adam:
+    #             if DeepSpeedCPUAdam:
+    #                 OptimizerClass = DeepSpeedCPUAdam
+    #                 optimizer_kwargs["adamw_mode"] = True
+    #                 self.print("Using DeepSpeedCPUAdam optimizer (CPU Offload).")
+    #             else:
+    #                 self.print("DeepSpeedCPUAdam requested but not available, falling back to AdamW.")
+    #         else:
+    #             if FusedAdam:
+    #                 OptimizerClass = FusedAdam
+    #                 optimizer_kwargs["adam_w_mode"] = True
+    #                 self.print("Using FusedAdam optimizer (GPU).")
+    #             else:
+    #                 self.print("FusedAdam requested but not available, falling back to AdamW.")
+    #     else:
+    #          self.print(f"Using standard torch.optim.AdamW optimizer.")
 
 
-        optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
+    #     optimizer = OptimizerClass(optimizer_grouped_parameters, **optimizer_kwargs)
 
-        # --- Optional: Learning Rate Scheduler ---
-        # Example: Linear warmup and decay (requires installing transformers)
-        # from transformers import get_linear_schedule_with_warmup
-        # try:
-        #    num_training_steps = self.trainer.estimated_stepping_batches
-        #    self.print(f"Estimated training steps: {num_training_steps}")
-        # except Exception:
-        #     # Might fail if trainer setup isn't complete yet, provide fallback or estimate
-        #     num_training_steps = 100000 # Placeholder, adjust
-        #     self.print(f"Could not estimate training steps, using placeholder: {num_training_steps}")
+    #     # --- Optional: Learning Rate Scheduler ---
+    #     # Example: Linear warmup and decay (requires installing transformers)
+    #     # from transformers import get_linear_schedule_with_warmup
+    #     # try:
+    #     #    num_training_steps = self.trainer.estimated_stepping_batches
+    #     #    self.print(f"Estimated training steps: {num_training_steps}")
+    #     # except Exception:
+    #     #     # Might fail if trainer setup isn't complete yet, provide fallback or estimate
+    #     #     num_training_steps = 100000 # Placeholder, adjust
+    #     #     self.print(f"Could not estimate training steps, using placeholder: {num_training_steps}")
 
-        # scheduler = get_linear_schedule_with_warmup(
-        #     optimizer, num_warmup_steps=self.hparams.warmup_steps, num_training_steps=num_training_steps
-        # )
-        # scheduler_config = {"scheduler": scheduler, "interval": "step", "frequency": 1}
-        # return {"optimizer": optimizer, "lr_scheduler": scheduler_config}
+    #     # scheduler = get_linear_schedule_with_warmup(
+    #     #     optimizer, num_warmup_steps=self.hparams.warmup_steps, num_training_steps=num_training_steps
+    #     # )
+    #     # scheduler_config = {"scheduler": scheduler, "interval": "step", "frequency": 1}
+    #     # return {"optimizer": optimizer, "lr_scheduler": scheduler_config}
 
-        # Return only optimizer if no scheduler is used
-        return optimizer
+    #     # Return only optimizer if no scheduler is used
+    #     return optimizer
 
 # --- Example for local testing (Optional) ---
 if __name__ == "__main__":
