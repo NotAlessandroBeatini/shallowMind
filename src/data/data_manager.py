@@ -512,6 +512,56 @@ class LightningDataModule(pl.LightningDataModule):
                 print(f"❌ Could not stream/process dataset '{name}' split '{split_label}': {e}")
                 # Continue to next dataset in debug mode
 
+    def debug_packed_data(self, stage="fit", num_samples=3):
+        """
+        Runs setup and inspects the first few samples from the final,
+        packed and concatenated dataset. This is the data the model will actually see.
+        """
+        print(f"\n🔍 [DEBUG PACKED DATA] Setting up stage '{stage}' to inspect final data...")
+        try:
+            # Run setup to create self.train_dataset, self.val_dataset, etc.
+            self.setup(stage)
+
+            if stage in ("fit", "train"):
+                dataset = self.train_dataset
+                split_name = "train"
+            elif stage == "validation":
+                dataset = self.val_dataset
+                split_name = "validation"
+            else:
+                print(f"Unsupported stage '{stage}' for this debug function.")
+                return
+
+            if dataset is None or len(dataset) == 0:
+                print(f"No packed data available for split '{split_name}'. Nothing to inspect.")
+                return
+
+            print(f"\n--- 🔬 Inspecting {num_samples} packed samples from '{split_name}' dataset ---")
+            print(f"Total packed samples available: {len(dataset)}")
+            print(f"Each sample should have length: {self.max_length}\n")
+
+            for i in range(min(num_samples, len(dataset))):
+                print(f"--- Packed Sample {i} ---")
+                sample = dataset[i] # This calls the __getitem__ method
+                
+                input_ids = sample["input_ids"]
+                
+                print(f"  Shape of input_ids: {input_ids.shape}")
+                print(f"  First 15 tokens: {input_ids[:15].tolist()}")
+                print(f"  Last 15 tokens:  {input_ids[-15:].tolist()}")
+
+                # Decode the sample to see what it looks like
+                decoded_text = self.tokenizer.decode(input_ids)
+                print("\n  Decoded Text:")
+                # Use repr() to make special tokens like <|endoftext|> visible
+                print(repr(decoded_text)) 
+                print("-" * 50)
+        
+        except Exception as e:
+            print(f"\n❌ An error occurred during packed data debugging: {e}")
+            logging.error("Packed data debug failed", exc_info=True)
+
+
 
 # --- Helper Functions (Unchanged) ---
 def get_percentage_suffix(percentage_info):
@@ -608,6 +658,7 @@ def inspect_batch(batch, tokenizer=None, max_items=2, decode_labels=True):
 
         except Exception as e:
             print(f" Error processing sample {i} in inspect_batch: {e}")
+
 
 
 # --- Main Execution Example (Updated Cache Dir Structure & Exception Handling) ---
@@ -832,5 +883,11 @@ if __name__ == "__main__":
         gc.collect()
         logging.info("DataLoader variables deleted; persistent workers should terminate if idle.")
         # Note: Sometimes workers might linger; ensuring the main script exits cleanly is key.
+
+
+
+    logging.info("\n--- Running debug_packed_data() to verify sequence packing ---")
+    dm.debug_packed_data(stage="fit", num_samples=3)
+
 
     print("\n--- Script finished ---")

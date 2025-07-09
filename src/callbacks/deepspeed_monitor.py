@@ -2,35 +2,32 @@
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
 import logging
+import torch # Import torch
 
 logger = logging.getLogger(__name__)
 
 class DeepSpeedMonitor(Callback):
-    def __init__(self):
-        super().__init__()
-        self.grad_norm_dict = {}
+    # __init__ can be removed if it only calls super()
 
     def on_before_optimizer_step(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", optimizer):
-        """
-        This hook is called by Lightning just before the optimizer step.
-        It's the perfect place to get the grad norm from the DeepSpeed engine.
-        """
         if not hasattr(trainer.strategy, "model") or trainer.strategy.model is None:
-            # DeepSpeed engine not yet initialized
             return
 
-        # Access the DeepSpeedEngine instance
         deepspeed_engine = trainer.strategy.model
+        grad_norm = None # Default to None
 
-        # DeepSpeed has a `get_global_grad_norm` method which is exactly what we need.
-        # It might be called different things in different versions, so we check.
         if hasattr(deepspeed_engine, 'get_global_grad_norm'):
+            # This is a method call
             grad_norm = deepspeed_engine.get_global_grad_norm()
         elif hasattr(deepspeed_engine, 'global_grad_norm'):
+            # This is accessing an attribute
             grad_norm = deepspeed_engine.global_grad_norm
-        else:
-            grad_norm = -1.0 # Indicate that we couldn't find it
-
-        if grad_norm != -1.0:
-            # We use self.log here, which will be sent to W&B on the next logging step
+        
+        # --- THIS IS THE FIX ---
+        # Only log if grad_norm is a valid number (not None).
+        # We also check if it's a tensor and get its item() value if so.
+        if grad_norm is not None:
+            if isinstance(grad_norm, torch.Tensor):
+                grad_norm = grad_norm.item()
+                
             pl_module.log("deepspeed/grad_norm", grad_norm, on_step=True, on_epoch=False)
