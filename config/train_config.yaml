@@ -59,7 +59,7 @@ datamodule:
     batch_size: 4
     
     max_length: 128
-    num_workers: 25
+    num_workers: 8  #used initializing dataloader. should be <= cpus_per worker
     cache_dir: "data/main_cache"
 
 trainer:

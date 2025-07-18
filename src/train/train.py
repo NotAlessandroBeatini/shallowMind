@@ -313,6 +313,7 @@ def main(config: dict):
                 "CPU": ray_settings.get("cpus_per_worker", 1),
                 "GPU": 1 if accelerator_is_gpu else 0
             },
+            # placement_group_strategy="SPREAD" # Options: "PACK", "SPREAD", "STRICT_PACK", "STRICT_SPREAD"
             #placement_group_strategy=ray_settings.get("placement_group_strategy", "PACK")
         )
 
