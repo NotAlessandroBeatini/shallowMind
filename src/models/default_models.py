@@ -58,6 +58,7 @@ class HuggingFaceLLM(pl.LightningModule):
         model_name_or_path: str,
         tokenizer_name_or_path: Optional[str] = None,
         model_cache_dir: Optional[str] = None,
+        attn_implementation: Optional[str] = "sdpa",
         tokenizer_cache_dir: Optional[str] = None,
 
         # --- Training Hyperparameters ---
@@ -77,9 +78,11 @@ class HuggingFaceLLM(pl.LightningModule):
         predict_temperature: float = 0.7,
         predict_repetition_penalty: float = 1.0,
 
+        use_torch_compile: bool = False,
 
         # --- Debugging Control ---
         DEBUG_MODE: bool = False,
+
 
         **kwargs # Allow passing extra unused args from config
     ):
@@ -94,11 +97,11 @@ class HuggingFaceLLM(pl.LightningModule):
         current_locals = locals().copy()
         hparams_to_save = {
             key: current_locals[key] for key in [
-                "model_name_or_path", "tokenizer_name_or_path", "learning_rate",
+                "model_name_or_path", "attn_implementation", "tokenizer_name_or_path", "learning_rate",
                 "weight_decay", "adam_epsilon", "warmup_steps_ratio",
                 "use_deepspeed_adam", "prefer_cpu_adam", "predict_max_length",
                 "predict_num_beams", "predict_do_sample", "predict_top_k",
-                "predict_top_p", "predict_temperature", "predict_repetition_penalty"
+                "predict_top_p", "predict_temperature", "predict_repetition_penalty", "use_torch_compile" ,
             ]
         }
         # Add any other predict_* params from kwargs if they were passed
@@ -117,7 +120,8 @@ class HuggingFaceLLM(pl.LightningModule):
             _tokenizer_path,
             cache_dir=self.tokenizer_cache_dir,
             use_fast=True,
-            padding_side='left'
+            padding_side='left',
+            
         )
 
         if self.tokenizer.pad_token is None:
@@ -143,7 +147,8 @@ class HuggingFaceLLM(pl.LightningModule):
         self.model = AutoModelForCausalLM.from_pretrained(
             self.hparams.model_name_or_path,
             config=model_config,
-            cache_dir=self.model_cache_dir
+            cache_dir=self.model_cache_dir,
+            attn_implementation=self.hparams.attn_implementation,
         )
         
         current_model_vocab_size = self.model.get_input_embeddings().weight.size(0)
@@ -152,6 +157,15 @@ class HuggingFaceLLM(pl.LightningModule):
             self._printer(f"Resizing model token embeddings from {current_model_vocab_size} to {tokenizer_vocab_size}")
             self.model.resize_token_embeddings(tokenizer_vocab_size)
             self.model.config.vocab_size = tokenizer_vocab_size
+
+       # Optionally compile only the forward call
+        if use_torch_compile and hasattr(torch, "compile"):
+            compiled_fwd = torch.compile(self.model.forward)
+            # Bind the compiled function as this module’s forward
+            # We wrap it so that self is correctly passed through
+            def _forward_compiled(*args, **kwargs):
+                return compiled_fwd(*args, **kwargs)
+            self.forward = _forward_compiled
 
     def forward(self, input_ids: torch.Tensor, attention_mask: Optional[torch.Tensor] = None, labels: Optional[torch.Tensor] = None, **kwargs):
         return self.model(input_ids=input_ids, attention_mask=attention_mask, labels=labels, **kwargs)

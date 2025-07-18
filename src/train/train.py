@@ -125,6 +125,20 @@ def train_func_for_ray(train_loop_worker_config: dict):
     model = model_cls(**model_kwargs)
     logging.info(f"[Worker {worker_rank}] Model '{cfg_model['class_name']}' instantiated.")
 
+    # Apply torch.compile for a significant performance boostù
+    #NOT YET IMPLEMENTED IN LIGHTNING + RAYDEEPSPEED
+    # if cfg_run_settings.get("use_torch_compile", False):
+    #     import torch
+    #     # Check if we are on a compatible PyTorch version
+    #     if hasattr(torch, "compile"):
+    #         logging.info(f"[Worker {worker_rank}] Applying torch.compile() to the model. First few steps may be slow.")
+    #         # The 'mode' argument is optional but can be useful.
+    #         # "reduce-overhead" is great for large models as it compiles faster.
+    #         # "max-autotune" is slower to compile but may yield the best runtime performance.
+    #         model = torch.compile(model, mode="reduce-overhead")
+    #     else:
+    #         logging.warning(f"[Worker {worker_rank}] 'use_torch_compile' is true, but torch.compile is not available in PyTorch version {torch.__version__}. Skipping.")
+
     # 2. Instantiate DataModule
     dm_kwargs = cfg_datamodule.get("kwargs", {}).copy()
     if "cache_dir" in dm_kwargs:

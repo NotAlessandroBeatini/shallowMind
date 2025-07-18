@@ -59,6 +59,7 @@ def main():
     BASE = PROJ / "data" / "main_cache"
     RAW  = BASE / "raw"  / "HuggingFaceFW_fineweb"    # mirror goes here
     
+
     # ─── Mirror with retry ─────────────────────────────────────────────────────
     MAX_RETRIES = 5
     RETRY_DELAY = 30   # seconds
@@ -69,7 +70,7 @@ def main():
             snapshot_download(
                 repo_id="HuggingFaceFW/fineweb",
                 repo_type="dataset",
-                local_dir=RAW,
+                local_dir= RAW, #RAW,
                 allow_patterns="data/*.parquet",
                 resume_download=True,
                 max_workers=args.workers,

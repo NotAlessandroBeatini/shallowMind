@@ -13,6 +13,7 @@ run:
   use_wandb: true
   wandb_log_model: false # Logging model artifacts can be slow and use a lot of space.
   lr_monitor_logging_interval: "step" # Log learning rate every step.
+  
 
   # --- Ray Train Checkpointing ---
   # These are handled by Ray Train's RunConfig, not PyTorch Lightning's callbacks.
@@ -29,6 +30,8 @@ model:
   kwargs:
     # --- Core Model & Tokenizer Specification ---
     model_name_or_path: "gpt2"
+    attn_implementation: "flash_attention_2" #for automodel
+
     model_cache_dir: "data/model_cache"
     tokenizer_cache_dir: "data/model_cache"
 
@@ -41,6 +44,8 @@ model:
     # --- Generation Hyperparameters (for predict_step) ---
     predict_max_length: 128
     predict_num_beams: 1
+    use_torch_compile: false
+
     DEBUG_MODE: False
 
 datamodule:
@@ -71,7 +76,7 @@ trainer:
   
   # 'bf16-mixed' is generally preferred on modern GPUs (A100/H100).
   # '16-mixed' is for older GPUs.
-  precision: "16-mixed"
+  precision: "bf16-mixed"
   # NOTE: 'gradient_clip_val' is now handled by 'gradient_clipping' in the DeepSpeed config.
   # gradient_clip_val: 1.0
   val_check_interval: 200
@@ -95,7 +100,7 @@ strategy:
     # This is the actual batch size processed by one GPU in a single forward/backward pass.
     # It must match 'datamodule.kwargs.batch_size' for correct data loading.
     train_micro_batch_size_per_gpu: 4
-    fp16:
+    bf16:
       enabled: true
       
     # --- Gradient Clipping and Accumulation ---
